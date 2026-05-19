@@ -22,7 +22,6 @@ export default function Profile() {
       setLoading(false);
       return;
     }
-    setLoading(true);
     getCandidate(cid)
       .then((c) => {
         setCandidate(c);
