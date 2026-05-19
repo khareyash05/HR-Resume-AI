@@ -1,0 +1,24 @@
+     ✓ health 200
+     ✓ list 200
+     ✓ detail 200
+     ✓ detail has documents key
+     ✓ download 200
+     ✓ 404 on missing candidate
+
+   ✓ checks.........................: 100.00% ✓ 6        ✗ 0  
+     data_received..................: 5.8 kB  4.0 kB/s
+     data_sent......................: 414 B   286 B/s
+     http_req_blocked...............: avg=329.4µs  min=105µs  med=276µs    max=620µs    p(90)=522µs    p(95)=571µs   
+     http_req_connecting............: avg=181.6µs  min=85µs   med=188µs    max=261µs    p(90)=242.6µs  p(95)=251.8µs 
+     http_req_duration..............: avg=288.66ms min=1.17ms med=240.44ms max=648.08ms p(90)=516.53ms p(95)=582.3ms 
+       { expected_response:true }...: avg=302.22ms min=1.17ms med=279.82ms max=648.08ms p(90)=549.42ms p(95)=598.75ms
+     http_req_failed................: 20.00%  ✓ 1        ✗ 4  
+     http_req_receiving.............: avg=195.2µs  min=48µs   med=108µs    max=609µs    p(90)=411µs    p(95)=509.99µs
+     http_req_sending...............: avg=177µs    min=31µs   med=73µs     max=631µs    p(90)=413µs    p(95)=521.99µs
+     http_req_tls_handshaking.......: avg=0s       min=0s     med=0s       max=0s       p(90)=0s       p(95)=0s      
+     http_req_waiting...............: avg=288.29ms min=499µs  med=239.77ms max=647.89ms p(90)=516.36ms p(95)=582.13ms
+     http_reqs......................: 5       3.450853/s
+     iteration_duration.............: avg=1.44s    min=1.44s  med=1.44s    max=1.44s    p(90)=1.44s    p(95)=1.44s   
+     iterations.....................: 1       0.690171/s
+     vus............................: 1       min=1      max=1
+     vus_max........................: 1       min=1      max=1

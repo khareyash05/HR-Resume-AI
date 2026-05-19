@@ -1,0 +1,41 @@
+databases:
+  - name: hr-resume-db
+    databaseName: hr_resume_ai
+    user: hr
+    plan: free
+
+services:
+  - type: web
+    name: hr-resume-ai-backend
+    runtime: python
+    rootDir: backend
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app --bind 0.0.0.0:$PORT --workers 2 --timeout 120
+    envVars:
+      - key: GOOGLE_API_KEY
+        sync: false
+      - key: GEMINI_MODEL
+        value: gemini-3-flash-preview
+      - key: DATABASE_URL
+        fromDatabase:
+          name: hr-resume-db
+          property: connectionString
+    disk:
+      name: hr-resume-files
+      mountPath: /var/data
+      sizeGB: 1
+
+  - type: web
+    name: hr-resume-ai-frontend
+    runtime: static
+    rootDir: frontend
+    buildCommand: npm install && npm run build
+    staticPublishPath: dist
+    envVars:
+      - key: VITE_API_BASE
+        sync: false
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
