@@ -43,7 +43,7 @@ AGENT_SYSTEM_PROMPT = """You are an HR onboarding assistant. Your job is to requ
   """
 
 
-def generate_request(candidate: dict):
+def generate_request(candidate):
     api_key = os.getenv("GOOGLE_API_KEY")
     if not api_key:
         raise RuntimeError("GOOGLE_API_KEY is not set")
@@ -54,6 +54,7 @@ def generate_request(candidate: dict):
         google_api_key=api_key,
     )
 
+    # bind the tool so gemini's response comes back as expected format instead of hazy and unpredicatble formats
     llm_with_tools = llm.bind_tools([send_document_request])
 
     candidate_summary = (
@@ -73,10 +74,9 @@ def generate_request(candidate: dict):
 
     resp = llm_with_tools.invoke(messages)
 
-    tool_calls = getattr(resp, "tool_calls", None) or []
+    tool_calls = resp.tool_calls
     if tool_calls:
-        call = tool_calls[0]
-        args = (call.get("args") if isinstance(call, dict) else call.args) or {}
+        args = tool_calls[0].get("args") or {}
         return {
             "channel": args.get("channel", ""),
             "recipient": args.get("recipient", ""),
@@ -84,11 +84,11 @@ def generate_request(candidate: dict):
             "body": args.get("body", ""),
         }
 
-    # Fallback for when the model refuses to call the tool
+    # if not working with tools, usoing a falllback
     return _fallback_request(candidate)
 
 
-def _fallback_request(candidate: dict) -> dict:
+def _fallback_request(candidate):
     name = candidate.get("name") or "there"
     email = candidate.get("email")
     phone = candidate.get("phone")

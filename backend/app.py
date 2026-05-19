@@ -30,10 +30,11 @@ def create_app():
     app = Flask(__name__)
 
     db_url = os.getenv("DATABASE_URL", "")
-    # Render hands out "postgres://" but SQLAlchemy 2.x wants "postgresql://"
+    # sqlalchemy 2.x wants postgresql:// scheme, render gives us postgres://
     if db_url.startswith("postgres://"):
         db_url = db_url.replace("postgres://", "postgresql://", 1)
     app.config["SQLALCHEMY_DATABASE_URI"] = db_url
+    # getting 500 errors from db due to coneection close on 5 mintes idle time on free tiender with render
     app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
         "pool_pre_ping": True,
         "pool_recycle": 300,
@@ -63,11 +64,13 @@ def create_app():
         if ext not in ALLOWED_RESUME:
             return jsonify({"error": f"Unsupported file type: {ext}"}), 400
 
-        safe = secure_filename(f.filename)  # sanitizing the file name
+        # secure_filename strips path traversal like ../, uuid prefix
+        safe = secure_filename(f.filename)
         stored = f"{uuid.uuid4().hex}_{safe}"
         path = UPLOAD_DIR / stored
         f.save(path)
 
+        # commit the candidate row FIRST with status=pending, then extract, this ensures that if extraction fails, we still have candidate info with pending extraction
         candidate = Candidate(
             resume_filename=safe,
             resume_path=str(path),
@@ -90,6 +93,8 @@ def create_app():
             candidate.confidence = json.dumps(fields["confidence"])
             candidate.extraction_status = "done"
         except Exception as e:
+            # store the error so we can debug/retry later instead of just
+            # losing it
             candidate.extraction_status = "failed"
             candidate.extraction_error = str(e)
 
