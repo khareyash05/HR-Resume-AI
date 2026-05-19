@@ -9,7 +9,6 @@ from extractor import extract_fields, read_resume_text
 from flask import Flask, jsonify, request, send_file
 from flask_cors import CORS
 from models import Candidate, Document, RequestLog, db
-from sqlalchemy.pool import NullPool
 from werkzeug.utils import secure_filename
 
 load_dotenv()
@@ -35,9 +34,9 @@ def create_app():
     if db_url.startswith("postgres://"):
         db_url = db_url.replace("postgres://", "postgresql://", 1)
     app.config["SQLALCHEMY_DATABASE_URI"] = db_url
-    # handle 500 from flkay neon db
     app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
-        "poolclass": NullPool,
+        "pool_pre_ping": True,
+        "pool_recycle": 300,
     }
     app.config["MAX_CONTENT_LENGTH"] = MAX_BYTES
 

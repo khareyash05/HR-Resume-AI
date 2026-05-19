@@ -1,3 +1,9 @@
+databases:
+  - name: hr-resume-db
+    databaseName: hr_resume_ai
+    user: hr
+    plan: free
+
 services:
   - type: web
     name: hr-resume-ai-backend
@@ -12,7 +18,9 @@ services:
       - key: GEMINI_MODEL
         value: gemini-3-flash-preview
       - key: DATABASE_URL
-        sync: false
+        fromDatabase:
+          name: hr-resume-db
+          property: connectionString
 
   - type: web
     name: hr-resume-ai-frontend
