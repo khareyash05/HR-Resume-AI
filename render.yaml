@@ -21,10 +21,6 @@ services:
         fromDatabase:
           name: hr-resume-db
           property: connectionString
-    disk:
-      name: hr-resume-files
-      mountPath: /var/data
-      sizeGB: 1
 
   - type: web
     name: hr-resume-ai-frontend
