@@ -8,9 +8,19 @@ import {
   replaceResume,
   requestDocuments,
   submitDocuments,
+  updateCandidate,
   type CandidateDetail,
+  type CandidateState,
   type DocumentRow,
 } from "../api";
+
+const STATES: CandidateState[] = ["active", "accepted", "rejected", "on_hold"];
+const STATE_LABEL: Record<CandidateState, string> = {
+  active: "Active",
+  accepted: "Accepted",
+  rejected: "Rejected",
+  on_hold: "On hold",
+};
 
 export default function Profile() {
   const { id } = useParams<{ id: string }>();
@@ -128,6 +138,9 @@ export default function Profile() {
           confidence={candidate.confidence.designation}
         />
       </section>
+
+      <StatePanel candidate={candidate} onDone={load} />
+      <NotesPanel candidate={candidate} onDone={load} />
 
       <section style={section}>
         <h2 style={h2}>
@@ -741,5 +754,153 @@ function FilePicker({
         </button>
       )}
     </div>
+  );
+}
+
+function StatePanel({
+  candidate,
+  onDone,
+}: {
+  candidate: CandidateDetail;
+  onDone: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function setState(state: CandidateState) {
+    if (state === candidate.state) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await updateCandidate(candidate.id, { state });
+      onDone();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section style={section}>
+      <h2 style={h2}>Pipeline state</h2>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        {STATES.map((s) => {
+          const active = candidate.state === s;
+          return (
+            <button
+              key={s}
+              onClick={() => setState(s)}
+              disabled={busy || active}
+              style={{
+                padding: "6px 14px",
+                borderRadius: 6,
+                fontSize: 13,
+                cursor: active ? "default" : "pointer",
+                border: active
+                  ? "1px solid var(--primary)"
+                  : "1px solid var(--border)",
+                background: active ? "var(--primary)" : "transparent",
+                color: active ? "#fff" : "var(--text)",
+                fontWeight: active ? 600 : 400,
+              }}
+            >
+              {STATE_LABEL[s]}
+            </button>
+          );
+        })}
+      </div>
+      {error && (
+        <p style={{ color: "var(--error)", fontSize: 13, marginTop: 8 }}>
+          {error}
+        </p>
+      )}
+    </section>
+  );
+}
+
+function NotesPanel({
+  candidate,
+  onDone,
+}: {
+  candidate: CandidateDetail;
+  onDone: () => void;
+}) {
+  // local draft so HR can type freely without round-tripping every keystroke
+  const [draft, setDraft] = useState(candidate.notes ?? "");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+
+  // re-sync if the candidate object reloads with a different value (e.g. after
+  // someone else edited)
+  useEffect(() => {
+    setDraft(candidate.notes ?? "");
+  }, [candidate.notes]);
+
+  const dirty = draft !== (candidate.notes ?? "");
+
+  async function save() {
+    setBusy(true);
+    setError(null);
+    setSaved(false);
+    try {
+      await updateCandidate(candidate.id, { notes: draft || null });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 1500);
+      onDone();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section style={section}>
+      <h2 style={h2}>Notes</h2>
+      <textarea
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        placeholder="Interview feedback, joining date, salary expectation…"
+        rows={5}
+        style={{
+          width: "100%",
+          padding: 10,
+          border: "1px solid var(--border)",
+          borderRadius: 6,
+          fontSize: 14,
+          fontFamily: "inherit",
+          resize: "vertical",
+          boxSizing: "border-box",
+        }}
+      />
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 12,
+          marginTop: 8,
+        }}
+      >
+        <button
+          onClick={save}
+          disabled={busy || !dirty}
+          style={{
+            ...primaryBtn,
+            opacity: busy || !dirty ? 0.5 : 1,
+            cursor: busy || !dirty ? "default" : "pointer",
+          }}
+        >
+          {busy ? "Saving…" : "Save notes"}
+        </button>
+        {saved && (
+          <span style={{ color: "#166534", fontSize: 13 }}>Saved</span>
+        )}
+        {error && (
+          <span style={{ color: "var(--error)", fontSize: 13 }}>{error}</span>
+        )}
+      </div>
+    </section>
   );
 }

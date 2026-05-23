@@ -1,4 +1,6 @@
 const BASE = import.meta.env.VITE_API_BASE || "/api";
+export type CandidateState = "active" | "accepted" | "rejected" | "on_hold";
+
 export type Candidate = {
   id: number;
   resume_filename: string;
@@ -14,6 +16,9 @@ export type Candidate = {
   documents_status: "missing" | "partial" | "complete";
   has_pan: boolean;
   has_aadhaar: boolean;
+  notes: string | null;
+  state: CandidateState;
+  last_contacted_at: string | null;
   created_at: string;
 };
 
@@ -132,6 +137,22 @@ export async function reExtract(id: number): Promise<CandidateDetail> {
   if (!r.ok) {
     const err = await r.json().catch(() => ({}));
     throw new Error(err.error || "Re-parse failed");
+  }
+  return r.json();
+}
+
+export async function updateCandidate(
+  id: number,
+  patch: { notes?: string | null; state?: CandidateState },
+): Promise<CandidateDetail> {
+  const r = await fetch(`${BASE}/candidates/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(patch),
+  });
+  if (!r.ok) {
+    const err = await r.json().catch(() => ({}));
+    throw new Error(err.error || "Update failed");
   }
   return r.json();
 }

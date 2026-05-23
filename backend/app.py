@@ -25,6 +25,8 @@ ALLOWED_DOC_IMG = {".jpg", ".jpeg", ".png", ".pdf"}
 ALLOWED_RESUME = {".pdf", ".docx", ".doc"}
 MAX_BYTES = 10 * 1024 * 1024  # 10 MB
 
+ALLOWED_STATES = {"active", "accepted", "rejected", "on_hold"}
+
 
 def create_app():
     app = Flask(__name__)
@@ -110,6 +112,31 @@ def create_app():
     @app.get("/candidates/<int:cid>")
     def get_candidate(cid):
         c = Candidate.query.get_or_404(cid)
+        data = c.to_dict()
+        data["documents"] = [d.to_dict() for d in c.documents]
+        data["request_logs"] = [r.to_dict() for r in c.request_logs]
+        return jsonify(data)
+
+    @app.patch("/candidates/<int:cid>")
+    def update_candidate(cid):
+        c = Candidate.query.get_or_404(cid)
+        data = request.get_json(silent=True) or {}
+
+        if "notes" in data:
+            notes = data["notes"]
+            if notes is not None and not isinstance(notes, str):
+                return jsonify({"error": "notes must be a string or null"}), 400
+            c.notes = notes
+
+        if "state" in data:
+            state = data["state"]
+            if state not in ALLOWED_STATES:
+                return jsonify(
+                    {"error": f"state must be one of {sorted(ALLOWED_STATES)}"}
+                ), 400
+            c.state = state
+
+        db.session.commit()
         data = c.to_dict()
         data["documents"] = [d.to_dict() for d in c.documents]
         data["request_logs"] = [r.to_dict() for r in c.request_logs]

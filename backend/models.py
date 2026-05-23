@@ -30,6 +30,12 @@ class Candidate(db.Model):
     extraction_status = db.Column(db.String(20), default="pending")
     extraction_error = db.Column(db.Text)
 
+    # HR-managed fields, not derived from the resume
+    notes = db.Column(db.Text)
+    state = db.Column(
+        db.String(20), default="active"
+    )  # active, accepted, rejected, on_hold
+
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     documents = db.relationship(  # a relationship between documents and candidates, also removeing all instances if candidate is deleted
@@ -50,6 +56,12 @@ class Candidate(db.Model):
         else:
             docs_status = "missing"
 
+        last_contacted_at = None
+        if self.request_logs:
+            last_contacted_at = max(
+                r.created_at for r in self.request_logs
+            ).isoformat()
+
         return {
             "id": self.id,
             "resume_filename": self.resume_filename,
@@ -65,6 +77,9 @@ class Candidate(db.Model):
             "documents_status": docs_status,
             "has_pan": has_pan,
             "has_aadhaar": has_aadhaar,
+            "notes": self.notes,
+            "state": self.state or "active",
+            "last_contacted_at": last_contacted_at,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }
 

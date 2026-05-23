@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { listCandidates, type Candidate } from "../api";
+import { listCandidates, type Candidate, type CandidateState } from "../api";
 import UploadDropzone from "../components/UploadDropZone";
 
 // the dashboard "Status" column is not the same as the raw extraction_status —
@@ -9,6 +9,7 @@ import UploadDropzone from "../components/UploadDropZone";
 type OverallStatus = "pending" | "failed" | "awaiting" | "done";
 type OverallFilter = "all" | OverallStatus;
 type DocPresenceFilter = "all" | "yes" | "no";
+type StateFilter = "all" | CandidateState;
 
 function overallStatus(c: Candidate): OverallStatus {
   if (c.extraction_status === "failed") return "failed";
@@ -16,6 +17,13 @@ function overallStatus(c: Candidate): OverallStatus {
   if (!c.has_pan || !c.has_aadhaar) return "awaiting";
   return "done";
 }
+
+const STATE_LABEL: Record<CandidateState, string> = {
+  active: "active",
+  accepted: "accepted",
+  rejected: "rejected",
+  on_hold: "on hold",
+};
 
 export default function Dashboard() {
   const navigate = useNavigate()
@@ -26,6 +34,7 @@ export default function Dashboard() {
   const [statusFilter, setStatusFilter] = useState<OverallFilter>("all");
   const [panFilter, setPanFilter] = useState<DocPresenceFilter>("all");
   const [aadhaarFilter, setAadhaarFilter] = useState<DocPresenceFilter>("all");
+  const [stateFilter, setStateFilter] = useState<StateFilter>("all");
 
   useEffect(() => {
     let cancelled = false;
@@ -54,6 +63,7 @@ export default function Dashboard() {
     return candidates.filter((c) => {
       if (statusFilter !== "all" && overallStatus(c) !== statusFilter)
         return false;
+      if (stateFilter !== "all" && c.state !== stateFilter) return false;
       if (!matchesPresence(c.has_pan, panFilter)) return false;
       if (!matchesPresence(c.has_aadhaar, aadhaarFilter)) return false;
       if (!q) return true;
@@ -64,7 +74,7 @@ export default function Dashboard() {
         .toLowerCase();
       return hay.includes(q);
     });
-  }, [candidates, query, statusFilter, panFilter, aadhaarFilter]);
+  }, [candidates, query, statusFilter, stateFilter, panFilter, aadhaarFilter]);
 
   return (
     <div style={{ maxWidth: 960, margin: "40px auto", padding: "0 16px" }}>
@@ -123,9 +133,32 @@ export default function Dashboard() {
             onChange={(v) => setAadhaarFilter(v as DocPresenceFilter)}
             options={["all", "yes", "no"]}
           />
+          <FilterSelect
+            label="State"
+            value={stateFilter}
+            onChange={(v) => setStateFilter(v as StateFilter)}
+            options={["all", "active", "accepted", "rejected", "on_hold"]}
+          />
           <span style={{ color: "var(--text-muted)", fontSize: 13 }}>
             {filtered.length} of {candidates.length}
           </span>
+          <button
+            onClick={() => downloadCsv(filtered)}
+            disabled={filtered.length === 0}
+            title="Download filtered candidates as CSV"
+            style={{
+              marginLeft: "auto",
+              background: "none",
+              border: "1px solid var(--border)",
+              borderRadius: 6,
+              padding: "6px 12px",
+              fontSize: 13,
+              cursor: filtered.length === 0 ? "default" : "pointer",
+              color: "var(--text)",
+            }}
+          >
+            Export CSV
+          </button>
         </div>
       )}
 
@@ -150,8 +183,10 @@ export default function Dashboard() {
               <th style={th}>Email</th>
               <th style={th}>Company</th>
               <th style={th}>Status</th>
+              <th style={th}>State</th>
               <th style={th}>PAN</th>
               <th style={th}>Aadhaar</th>
+              <th style={th}>Last contacted</th>
               <th style={th}>Uploaded</th>
             </tr>
           </thead>
@@ -174,10 +209,20 @@ export default function Dashboard() {
                   <StatusPill status={overallStatus(c)} />
                 </td>
                 <td style={td}>
+                  <StatePill state={c.state} />
+                </td>
+                <td style={td}>
                   <PresencePill present={c.has_pan} />
                 </td>
                 <td style={td}>
                   <PresencePill present={c.has_aadhaar} />
+                </td>
+                <td style={td}>
+                  {c.last_contacted_at ? (
+                    new Date(c.last_contacted_at).toLocaleString()
+                  ) : (
+                    <span style={{ color: "var(--text-muted)" }}>—</span>
+                  )}
                 </td>
                 <td style={td}>{new Date(c.created_at).toLocaleString()}</td>
               </tr>
@@ -263,6 +308,31 @@ function StatusPill({ status }: { status: OverallStatus }) {
   );
 }
 
+function StatePill({ state }: { state: CandidateState }) {
+  const meta: Record<CandidateState, { bg: string; fg: string }> = {
+    active: { bg: "#e0e7ff", fg: "#3730a3" },
+    accepted: { bg: "#dcfce7", fg: "#166534" },
+    rejected: { bg: "#fee2e2", fg: "#991b1b" },
+    on_hold: { bg: "#fef3c7", fg: "#92400e" },
+  };
+  const { bg, fg } = meta[state];
+  return (
+    <span
+      style={{
+        background: bg,
+        color: fg,
+        padding: "2px 8px",
+        borderRadius: 12,
+        fontSize: 12,
+        fontWeight: 500,
+        whiteSpace: "nowrap",
+      }}
+    >
+      {STATE_LABEL[state]}
+    </span>
+  );
+}
+
 function PresencePill({ present }: { present: boolean }) {
   const { bg, fg, label } = present
     ? { bg: "#dcfce7", fg: "#166534", label: "yes" }
@@ -281,4 +351,60 @@ function PresencePill({ present }: { present: boolean }) {
       {label}
     </span>
   );
+}
+
+// CSV export — flatten one row per candidate. Skills joined with "; " so a
+// single cell stays human-readable in Excel/Sheets.
+function downloadCsv(rows: Candidate[]) {
+  const headers = [
+    "id",
+    "name",
+    "email",
+    "phone",
+    "company",
+    "designation",
+    "skills",
+    "status",
+    "state",
+    "has_pan",
+    "has_aadhaar",
+    "last_contacted_at",
+    "created_at",
+  ];
+  const body = rows.map((c) => [
+    c.id,
+    c.name ?? "",
+    c.email ?? "",
+    c.phone ?? "",
+    c.company ?? "",
+    c.designation ?? "",
+    c.skills.join("; "),
+    overallStatus(c),
+    c.state,
+    c.has_pan ? "yes" : "no",
+    c.has_aadhaar ? "yes" : "no",
+    c.last_contacted_at ?? "",
+    c.created_at,
+  ]);
+
+  const csv = [headers, ...body]
+    .map((row) => row.map(csvCell).join(","))
+    .join("\n");
+
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  const stamp = new Date().toISOString().slice(0, 10);
+  a.href = url;
+  a.download = `candidates-${stamp}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function csvCell(v: string | number): string {
+  const s = String(v);
+  if (/[",\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+  return s;
 }
