@@ -180,6 +180,118 @@ def create_app():
         doc = Document.query.filter_by(id=doc_id, candidate_id=cid).first_or_404()
         return send_file(doc.path, download_name=doc.filename, as_attachment=False)
 
+    @app.get("/candidates/<int:cid>/resume")
+    def download_resume(cid):
+        c = Candidate.query.get_or_404(cid)
+        if not Path(c.resume_path).exists():
+            return jsonify({"error": "Resume file no longer on disk"}), 404
+        return send_file(
+            c.resume_path, download_name=c.resume_filename, as_attachment=False
+        )
+
+    @app.post("/candidates/<int:cid>/re-extract")
+    def re_extract(cid):
+        c = Candidate.query.get_or_404(cid)
+        text = c.raw_text
+        if not text:
+            if not Path(c.resume_path).exists():
+                return jsonify({"error": "Resume file no longer on disk"}), 404
+            try:
+                text = read_resume_text(c.resume_path)
+                c.raw_text = text
+            except Exception as e:
+                c.extraction_status = "failed"
+                c.extraction_error = f"read_resume_text: {e}"
+                db.session.commit()
+                return jsonify({"error": str(e)}), 500
+
+        try:
+            fields = extract_fields(text)
+            c.name = fields["name"]
+            c.email = fields["email"]
+            c.phone = fields["phone"]
+            c.company = fields["company"]
+            c.designation = fields["designation"]
+            c.skills = json.dumps(fields["skills"])
+            c.confidence = json.dumps(fields["confidence"])
+            c.extraction_status = "done"
+            c.extraction_error = None
+        except Exception as e:
+            c.extraction_status = "failed"
+            c.extraction_error = str(e)
+            db.session.commit()
+            return jsonify({"error": str(e)}), 500
+
+        db.session.commit()
+        return jsonify(c.to_dict())
+
+    @app.post("/candidates/<int:cid>/replace-resume")
+    def replace_resume(cid):
+        c = Candidate.query.get_or_404(cid)
+
+        if "file" not in request.files:
+            return jsonify({"error": "No file uploaded"}), 400
+        f = request.files["file"]
+        if not f.filename:
+            return jsonify({"error": "Empty filename"}), 400
+
+        ext = Path(f.filename).suffix.lower()
+        if ext not in ALLOWED_RESUME:
+            return jsonify({"error": f"Unsupported file type: {ext}"}), 400
+
+        safe = secure_filename(f.filename)
+        stored = f"{uuid.uuid4().hex}_{safe}"
+        new_path = UPLOAD_DIR / stored
+        f.save(new_path)
+
+        # we only delete the old file once new is up and extracted
+        old_path = c.resume_path
+        c.resume_filename = safe
+        c.resume_path = str(new_path)
+        c.raw_text = None
+        c.extraction_status = "pending"
+        c.extraction_error = None
+
+        try:
+            text = read_resume_text(str(new_path))
+            c.raw_text = text
+            fields = extract_fields(text)
+            c.name = fields["name"]
+            c.email = fields["email"]
+            c.phone = fields["phone"]
+            c.company = fields["company"]
+            c.designation = fields["designation"]
+            c.skills = json.dumps(fields["skills"])
+            c.confidence = json.dumps(fields["confidence"])
+            c.extraction_status = "done"
+        except Exception as e:
+            c.extraction_status = "failed"
+            c.extraction_error = str(e)
+
+        db.session.commit()
+        if old_path and old_path != str(new_path):
+            try:
+                Path(old_path).unlink(missing_ok=True)
+            except OSError:
+                pass
+
+        return jsonify(c.to_dict())
+
+    @app.post("/admin/poll-email")
+    @app.get("/admin/poll-email")
+    def poll_email():
+        expected = os.getenv("POLL_TOKEN")
+        if expected and request.args.get("token") != expected:
+            return jsonify({"error": "unauthorized"}), 401
+
+        from worker import run_one_poll
+
+        try:
+            run_one_poll()
+        except Exception as e:
+            return jsonify({"status": "error", "error": str(e)}), 500
+        return jsonify({"status": "ok"}), 200
+
     return app
 
 

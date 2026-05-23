@@ -40,6 +40,16 @@ class Candidate(db.Model):
     )
 
     def to_dict(self):
+        types_present = {d.doc_type for d in self.documents}
+        has_pan = "pan" in types_present
+        has_aadhaar = "aadhaar" in types_present
+        if has_pan and has_aadhaar:
+            docs_status = "complete"
+        elif types_present:
+            docs_status = "partial"
+        else:
+            docs_status = "missing"
+
         return {
             "id": self.id,
             "resume_filename": self.resume_filename,
@@ -52,6 +62,9 @@ class Candidate(db.Model):
             "confidence": json.loads(self.confidence) if self.confidence else {},
             "extraction_status": self.extraction_status,
             "extraction_error": self.extraction_error,
+            "documents_status": docs_status,
+            "has_pan": has_pan,
+            "has_aadhaar": has_aadhaar,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }
 

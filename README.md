@@ -29,24 +29,24 @@ Live: <https://hr-resume-ai-frontend.onrender.com>
                   └──────────┬───────────┘
                              │  HTTPS / JSON
                              ▼
-                  ┌──────────────────────┐
-                  │  Flask + gunicorn    │
-                  │  Render web service  │
-                  │   ┌──────────────┐   │
-                  │   │  app.py      │   │  routes
-                  │   │  extractor   │───┼──► Gemini (resume → fields)
-                  │   │  agent       │───┼──► Gemini (fields → email/SMS draft)
-                  │   │  models      │   │
-                  │   └──────────────┘   │
-                  └────┬──────────┬──────┘
-                       │          │
-              SQLAlchemy          │ local disk
-                       │          │ (ephemeral)
-                       ▼          ▼
-              ┌──────────────┐   ┌──────────────┐
-              │  Postgres    │   │ uploads/     │
-              │  (Render)    │   │ documents/   │
-              └──────────────┘   └──────────────┘
+                             ┌──────────────────────┐
+   IMAP worker  ────HTTP────►│  Flask + gunicorn    │
+   (Render worker svc)       │  Render web service  │
+                             │   ┌──────────────┐   │
+                             │   │  app.py      │   │  routes
+                             │   │  extractor   │───┼──► Gemini (resume → fields)
+                             │   │  agent       │───┼──► Gemini (fields → email/SMS draft)
+                             │   │  models      │   │
+                             │   └──────────────┘   │
+                             └────┬──────────┬──────┘
+                                  │          │
+                         SQLAlchemy          │ local disk
+                                  │          │ (ephemeral)
+                                  ▼          ▼
+                         ┌──────────────┐   ┌──────────────┐
+                         │  Postgres    │   │ uploads/     │
+                         │  (Render)    │   │ documents/   │
+                         └──────────────┘   └──────────────┘
 ```
 
 ## API
@@ -78,9 +78,11 @@ Upload a resume.
     },
     "extraction_status": "done",
     "extraction_error": null,
+    "documents_status": "missing",
     "created_at": "2026-05-19T05:51:02.298726"
   }
   ```
+- `documents_status` is derived from the related `Document` rows: `"complete"` when both PAN and Aadhaar exist, `"partial"` for one, `"missing"` for none.
 - **Errors**: `400` (no file / empty filename / unsupported extension), `413` (over 10 MB).
 
 ### `GET /candidates`
@@ -136,6 +138,37 @@ Download a document. The composite `(cid, doc_id)` filter prevents cross-candida
 - **Response**: file stream, inline (not attachment), original filename.
 - **Errors**: `404` if not found.
 
+### `GET /candidates/<int:cid>/resume`
+Stream the original resume file the candidate was created from.
+
+- **Response**: file stream, inline.
+- **Errors**: `404` if the candidate doesn't exist, or if the file is no longer on disk (Render free-tier disks are ephemeral, so this can happen after a redeploy even if the DB row survives).
+
+### `POST /candidates/<int:cid>/re-extract`
+Re-run field extraction on an existing candidate without re-uploading. Reuses the cached `raw_text` from the original parse, falling back to re-reading the file from disk only if the cache is empty.
+
+- **Body**: none.
+- **Response 200**: the updated candidate object.
+- **Errors**: `404` if candidate not found / resume file gone, `500` if extraction fails (status is set to `failed` and `extraction_error` is populated).
+
+### `POST /candidates/<int:cid>/replace-resume`
+Replace the resume file on an existing candidate and re-run extraction against the new file. The candidate's `Document` rows (PAN / Aadhaar) and `RequestLog`s are preserved; only resume-derived fields are overwritten.
+
+- **Body**: `multipart/form-data` with one field `file` (PDF, DOCX, or DOC).
+- **Max size**: 10 MB.
+- **Behavior**: saves the new file, deletes the old one (best-effort), resets `raw_text` and re-extracts. On extraction failure, `extraction_status` is set to `failed` with the error in `extraction_error`, and previously extracted fields are gone (overwritten before extraction runs).
+- **Response 200**: the updated candidate object.
+- **Errors**: `400` (no file / empty filename / unsupported extension), `404` if candidate not found, `413` (over 10 MB).
+
+### `GET|POST /admin/poll-email`
+Trigger one IMAP poll cycle. Designed to be called by an external cron service every few minutes — see [Email ingestion (IMAP)](#email-ingestion-imap).
+
+- **Body**: none.
+- **Auth**: optional `?token=<POLL_TOKEN>` shared secret. Skipped if the env var is unset.
+- **Behavior**: connects to IMAP, processes unread mail (newest first, optionally restricted to last `IMAP_SINCE_DAYS` days), saves matching attachments via `/submit-documents`, marks messages as `Seen`, disconnects.
+- **Response 200**: `{"status": "ok"}`.
+- **Errors**: `401` (bad token), `500` (IMAP / DB error — error string in `error` field).
+
 ---
 
 ## Local development
@@ -155,12 +188,14 @@ Environment variables:
 - `GEMINI_MODEL` — defaults to `gemini-3-pro-preview`; production uses `gemini-3-flash-preview`.
 - `DATABASE_URL` — Postgres connection string.
 
+The IMAP worker (`backend/worker.py`) takes its own env vars — see [Email ingestion](#email-ingestion-imap-worker).
+
 ### Frontend
 
 ```bash
 cd frontend
 npm install
-npm run dev            # serves on :5173, proxies /api → :5050
+npm run dev            
 ```
 
 Vite dev server proxies `/api/*` to the local backend. In production, `VITE_API_BASE` is baked into the bundle at build time.
@@ -178,5 +213,4 @@ k6 scripts in `backend/load/`:
 | `upload.js` | Uploads a sample PDF in a loop |
 
 Run: `k6 run backend/load/smoke.js`. Each script writes a summary to `backend/load/results/<name>.txt` via `handleSummary`.
-
 ---

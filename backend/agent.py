@@ -4,10 +4,9 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.tools import tool
 from langchain_google_genai import ChatGoogleGenerativeAI
 
+
 @tool
-def send_document_request(
-    channel: str, recipient: str, subject: str, body: str
-) -> str:
+def send_document_request(channel: str, recipient: str, subject: str, body: str) -> str:
     """Send a personalized PAN/Aadhaar document request to the candidate.
 
     Args:

@@ -11,6 +11,9 @@ export type Candidate = {
   confidence: Record<string, number>;
   extraction_status: "pending" | "done" | "failed";
   extraction_error?: string | null;
+  documents_status: "missing" | "partial" | "complete";
+  has_pan: boolean;
+  has_aadhaar: boolean;
   created_at: string;
 };
 
@@ -116,4 +119,36 @@ export async function submitDocuments(
 
 export function documentUrl(candidateId: number, docId: number): string {
   return `${BASE}/candidates/${candidateId}/documents/${docId}`;
+}
+
+export function resumeUrl(candidateId: number): string {
+  return `${BASE}/candidates/${candidateId}/resume`;
+}
+
+export async function reExtract(id: number): Promise<CandidateDetail> {
+  const r = await fetch(`${BASE}/candidates/${id}/re-extract`, {
+    method: "POST",
+  });
+  if (!r.ok) {
+    const err = await r.json().catch(() => ({}));
+    throw new Error(err.error || "Re-parse failed");
+  }
+  return r.json();
+}
+
+export async function replaceResume(
+  id: number,
+  file: File,
+): Promise<CandidateDetail> {
+  const fd = new FormData();
+  fd.append("file", file);
+  const r = await fetch(`${BASE}/candidates/${id}/replace-resume`, {
+    method: "POST",
+    body: fd,
+  });
+  if (!r.ok) {
+    const err = await r.json().catch(() => ({}));
+    throw new Error(err.error || "Replace resume failed");
+  }
+  return r.json();
 }

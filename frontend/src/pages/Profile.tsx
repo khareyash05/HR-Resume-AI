@@ -3,9 +3,13 @@ import { Link, useParams } from "react-router-dom";
 import {
   getCandidate,
   documentUrl,
+  resumeUrl,
+  reExtract,
+  replaceResume,
   requestDocuments,
   submitDocuments,
   type CandidateDetail,
+  type DocumentRow,
 } from "../api";
 
 export default function Profile() {
@@ -61,6 +65,10 @@ export default function Profile() {
       </h1>
       <p style={{ color: "var(--text-muted)", marginTop: -8 }}>
         Resume: {candidate.resume_filename}
+        {" · "}
+        <a href={resumeUrl(candidate.id)} target="_blank" rel="noreferrer">
+          view
+        </a>
       </p>
 
       {candidate.extraction_status === "failed" && (
@@ -78,20 +86,35 @@ export default function Profile() {
       )}
 
       <section style={section}>
-        <h2 style={h2}>Extracted fields</h2>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            marginBottom: 12,
+          }}
+        >
+          <h2 style={{ ...h2, marginBottom: 0 }}>Extracted fields</h2>
+          <div style={{ display: "flex", gap: 8 }}>
+            <ReParseButton candidateId={candidate.id} onDone={load} />
+            <ReplaceResumeButton candidateId={candidate.id} onDone={load} />
+          </div>
+        </div>
         <FieldRow
           label="Name"
           value={candidate.name}
           confidence={candidate.confidence.name}
         />
-        <FieldRow
+        <ContactRow
           label="Email"
           value={candidate.email}
+          href={candidate.email ? `mailto:${candidate.email}` : null}
           confidence={candidate.confidence.email}
         />
-        <FieldRow
+        <ContactRow
           label="Phone"
           value={candidate.phone}
+          href={candidate.phone ? `tel:${candidate.phone}` : null}
           confidence={candidate.confidence.phone}
         />
         <FieldRow
@@ -142,37 +165,10 @@ export default function Profile() {
             No documents uploaded yet.
           </p>
         ) : (
-          <ul style={{ paddingLeft: 18, margin: 0 }}>
-            {candidate.documents.map((d) => (
-              <li key={d.id} style={{ marginBottom: 4 }}>
-                <strong
-                  style={{
-                    textTransform: "uppercase",
-                    fontSize: 12,
-                    marginRight: 8,
-                  }}
-                >
-                  {d.doc_type}
-                </strong>
-                <a
-                  href={documentUrl(candidate.id, d.id)}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  {d.filename}
-                </a>
-                <span
-                  style={{
-                    color: "var(--text-muted)",
-                    fontSize: 13,
-                    marginLeft: 8,
-                  }}
-                >
-                  ({new Date(d.uploaded_at).toLocaleString()})
-                </span>
-              </li>
-            ))}
-          </ul>
+          <DocumentList
+            candidateId={candidate.id}
+            documents={candidate.documents}
+          />
         )}
       </section>
 
@@ -260,6 +256,75 @@ function FieldRow({
       <div style={{ color: "var(--text-muted)", fontSize: 14 }}>{label}</div>
       <div>
         {value || <em style={{ color: "var(--text-muted)" }}>not extracted</em>}
+      </div>
+      <ConfidenceChip score={confidence} />
+    </div>
+  );
+}
+
+function ContactRow({
+  label,
+  value,
+  href,
+  confidence,
+}: {
+  label: string;
+  value: string | null;
+  href: string | null;
+  confidence: number | undefined;
+}) {
+  const [copied, setCopied] = useState(false);
+
+  async function copy() {
+    if (!value) return;
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1200);
+    } catch {
+      // clipboard API can be blocked (e.g. http context) — ignore silently
+    }
+  }
+
+  return (
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: "120px 1fr auto",
+        gap: 12,
+        padding: "8px 0",
+        borderBottom: "1px solid var(--border)",
+        alignItems: "center",
+      }}
+    >
+      <div style={{ color: "var(--text-muted)", fontSize: 14 }}>{label}</div>
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        {value ? (
+          href ? (
+            <a href={href}>{value}</a>
+          ) : (
+            <span>{value}</span>
+          )
+        ) : (
+          <em style={{ color: "var(--text-muted)" }}>not extracted</em>
+        )}
+        {value && (
+          <button
+            onClick={copy}
+            title="Copy"
+            style={{
+              background: "none",
+              border: "1px solid var(--border)",
+              borderRadius: 4,
+              padding: "1px 6px",
+              fontSize: 11,
+              color: "var(--text-muted)",
+              cursor: "pointer",
+            }}
+          >
+            {copied ? "copied" : "copy"}
+          </button>
+        )}
       </div>
       <ConfidenceChip score={confidence} />
     </div>
@@ -435,6 +500,193 @@ function SubmitDocsPanel({
         </p>
       )}
     </section>
+  );
+}
+
+function ReParseButton({
+  candidateId,
+  onDone,
+}: {
+  candidateId: number;
+  onDone: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleClick() {
+    setBusy(true);
+    setError(null);
+    try {
+      await reExtract(candidateId);
+      onDone();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+      {error && (
+        <span style={{ color: "var(--error)", fontSize: 12 }}>{error}</span>
+      )}
+      <button
+        onClick={handleClick}
+        disabled={busy}
+        style={{
+          background: "none",
+          border: "1px solid var(--border)",
+          color: "var(--text)",
+          padding: "4px 10px",
+          borderRadius: 6,
+          fontSize: 13,
+          cursor: busy ? "default" : "pointer",
+        }}
+      >
+        {busy ? "Re-parsing…" : "Re-parse resume"}
+      </button>
+    </div>
+  );
+}
+
+function ReplaceResumeButton({
+  candidateId,
+  onDone,
+}: {
+  candidateId: number;
+  onDone: () => void;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleFile(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    // clear so picking the same filename again still fires onChange
+    if (inputRef.current) inputRef.current.value = "";
+    if (!file) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await replaceResume(candidateId, file);
+      onDone();
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+      {error && (
+        <span style={{ color: "var(--error)", fontSize: 12 }}>{error}</span>
+      )}
+      <input
+        ref={inputRef}
+        type="file"
+        accept=".pdf,.docx,.doc"
+        onChange={handleFile}
+        style={{ display: "none" }}
+      />
+      <button
+        onClick={() => inputRef.current?.click()}
+        disabled={busy}
+        style={{
+          background: "none",
+          border: "1px solid var(--border)",
+          color: "var(--text)",
+          padding: "4px 10px",
+          borderRadius: 6,
+          fontSize: 13,
+          cursor: busy ? "default" : "pointer",
+        }}
+      >
+        {busy ? "Replacing…" : "Replace resume"}
+      </button>
+    </div>
+  );
+}
+
+function DocumentList({
+  candidateId,
+  documents,
+}: {
+  candidateId: number;
+  documents: DocumentRow[];
+}) {
+  // mark the most recent doc per type as "latest" — HR scans for the freshest
+  // upload, older ones are kept for audit
+  const sorted = [...documents].sort(
+    (a, b) =>
+      new Date(b.uploaded_at).getTime() - new Date(a.uploaded_at).getTime(),
+  );
+  const latestIdByType = new Map<string, number>();
+  for (const d of sorted) {
+    if (!latestIdByType.has(d.doc_type)) latestIdByType.set(d.doc_type, d.id);
+  }
+
+  return (
+    <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
+      {sorted.map((d) => {
+        const isLatest = latestIdByType.get(d.doc_type) === d.id;
+        return (
+          <li
+            key={d.id}
+            style={{
+              marginBottom: 6,
+              padding: "6px 8px",
+              borderRadius: 6,
+              background: isLatest ? "#ecfdf5" : "transparent",
+              border: isLatest ? "1px solid #a7f3d0" : "1px solid transparent",
+            }}
+          >
+            <strong
+              style={{
+                textTransform: "uppercase",
+                fontSize: 12,
+                marginRight: 8,
+              }}
+            >
+              {d.doc_type}
+            </strong>
+            <a
+              href={documentUrl(candidateId, d.id)}
+              target="_blank"
+              rel="noreferrer"
+            >
+              {d.filename}
+            </a>
+            {isLatest && (
+              <span
+                style={{
+                  background: "#10b981",
+                  color: "#fff",
+                  fontSize: 11,
+                  fontWeight: 600,
+                  padding: "1px 6px",
+                  borderRadius: 10,
+                  marginLeft: 8,
+                  textTransform: "uppercase",
+                }}
+              >
+                latest
+              </span>
+            )}
+            <span
+              style={{
+                color: "var(--text-muted)",
+                fontSize: 13,
+                marginLeft: 8,
+              }}
+            >
+              ({new Date(d.uploaded_at).toLocaleString()})
+            </span>
+          </li>
+        );
+      })}
+    </ul>
   );
 }
 
